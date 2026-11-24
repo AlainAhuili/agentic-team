@@ -288,22 +288,51 @@ async def run_team(goal: str) -> str:
         outputs = await asyncio.gather(
             *(WORKERS[s["agent"]].run(s["task"], context) for s in plan if s["agent"] in WORKERS)
         )
-        for step, out in zip(plan, outputs):
-            board.results[step["agent"]] = out
-            print(f"  done <- {step['agent']}")
+        board.results = {}                    # each round replaces the previous round's work
+        for n, (step, out) in enumerate(zip(plan, outputs), 1):
+            # One entry per task, so several tasks for the same agent don't overwrite each other.
+            board.results[f"{step['agent']} #{n}: {step['task'][:80]}"] = out
+            print(f"  done <- {step['agent']} #{n}")
 
         # 3. Review
         verdict = await ask_json(REVIEWER, f"ROUND {round_no}: review the work.", board.as_context(), normalize_verdict)
         if verdict["approved"]:
             print("  reviewer: approved")
+            save_result(board, verdict.get("final", ""), approved=True)
             return verdict.get("final") or board.as_context()
         board.feedback = verdict["feedback"]
         print(f"  reviewer: rejected -> {board.feedback}")
 
+    save_result(board, "", approved=False)
     return "Stopped after max rounds. Last state:\n" + board.as_context()
 
 
+RESULT_FILE = os.environ.get("RESULT_FILE", "final_result.md")
+
+
+def save_result(board: "Blackboard", summary: str, approved: bool) -> None:
+    """Write the reviewer's summary plus every task's full output to a Markdown file."""
+    lines = [f"# {board.goal}", "", f"**Status:** {'approved' if approved else 'not approved (max rounds reached)'}", ""]
+    if summary:
+        lines += ["## Reviewer summary", "", str(summary), ""]
+    if board.feedback and not approved:
+        lines += ["## Last reviewer feedback", "", board.feedback, ""]
+    for name, output in board.results.items():
+        lines += [f"## {name}", "", str(output), ""]
+    with open(RESULT_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"  saved full result to {RESULT_FILE}")
+
+
 if __name__ == "__main__":
+    # Windows terminals default to cp1252, which can't print emoji or many symbols
+    # that models produce. Switch to UTF-8 and replace anything still unprintable.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     goal = " ".join(sys.argv[1:]) or "Build a CLI tool that checks if URLs in a README are alive"
     mode = "mock" if os.environ.get("AGENT_MOCK") == "1" else PROVIDER
     print(f"Provider: {mode}")
