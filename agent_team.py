@@ -76,7 +76,7 @@ async def _call_anthropic(model: str, system: str, prompt: str) -> str:
 
 
 async def _call_ollama(model: str, system: str, prompt: str) -> str:
-    import httpx  # installed together with anthropic / google-genai
+    import httpx  # listed in requirements.txt
 
     payload = {
         "model": model,
