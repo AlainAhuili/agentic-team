@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+  mock-run:
+    name: Mock run (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    env:
+      AGENT_MOCK: "1"          # offline: no API keys or models needed
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: bash            # same commands on Linux and Windows (Git Bash)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check the providers' SDKs import
+        run: python -c "import anthropic, httpx; from google import genai; print('SDKs OK')"
+
+      - name: Run the agent team in mock mode
+        run: python agent_team.py "Build a CLI tool that checks if URLs in a README are alive" | tee run.log
+
+      - name: Verify the run
+        run: |
+          set -e
+          grep -q "Provider: mock"      run.log || { echo "::error::Mock mode was not used"; exit 1; }
+          grep -q "reviewer: rejected"  run.log || { echo "::error::Review/retry loop did not run"; exit 1; }
+          grep -q "reviewer: approved"  run.log || { echo "::error::Team never got approved"; exit 1; }
+          test -s final_result.md              || { echo "::error::final_result.md missing or empty"; exit 1; }
+          grep -q "^## researcher #1"   final_result.md || { echo "::error::Task results missing in final_result.md"; exit 1; }
+          echo "Mock run verified"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            run.log
+            final_result.md
+          if-no-files-found: ignore

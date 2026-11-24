@@ -1,5 +1,7 @@
 # agentic-team
 
+[![CI](https://github.com/AlainAhuili/agentic-team/actions/workflows/ci.yml/badge.svg)](https://github.com/AlainAhuili/agentic-team/actions/workflows/ci.yml)
+
 A minimal **orchestrator-worker team of AI agents** in plain Python: no agent framework, a single file, and three interchangeable LLM providers (Google Gemini, Anthropic Claude, or a local model via Ollama).
 
 An orchestrator splits a goal into tasks, specialist agents work on them in parallel, and a reviewer approves the result or sends it back with feedback for another round.
@@ -150,6 +152,15 @@ WORKERS = {
     "tester": Agent("tester", "You are the tester. Write pytest tests for the code produced so far."),
 }
 ```
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `main`:
+
+1. **Lint**: `ruff check` on Ubuntu
+2. **Mock run**: the full agent loop in `AGENT_MOCK=1` mode on Ubuntu and Windows with Python 3.10 and 3.12. It checks that the retry loop ran, the team got approved and `final_result.md` was written, then uploads the log and result as artifacts.
+
+CI needs no API keys or secrets.
 
 ## Limitations and next steps
 
